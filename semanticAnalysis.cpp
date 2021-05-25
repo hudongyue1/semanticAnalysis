@@ -1051,11 +1051,34 @@ struct SymbolTable {
 struct Attribute {
 	string Type;
 	int value;
+	int numberInTable;
 	Attribute() {
 		Type = "";
 		value = 0;
+		numberInTable = -1;
 	}
 };
+
+struct semanticTreeNode {
+	string element;
+	string classify;
+	semanticTreeNode* left;
+	semanticTreeNode* right;
+	semanticTreeNode(string element, string classify) {
+		this->element = element;
+		this->classify = classify;
+		this->left = nullptr;
+		this->right = nullptr;
+	}
+
+};
+
+void printSemanticTree(semanticTreeNode& node) {
+	cout << node.element << endl;
+	/*if (node.left != nullptr) printSemanticTree(*node.left);
+	if (node.right != nullptr) printSemanticTree(*node.right);*/
+	return;
+}
 
 
 SymbolTable mySymbolTable;
@@ -1063,6 +1086,7 @@ SymbolTable mySymbolTable;
 void process() {
 	stack<int> stateStk;
 	stack<pair<Symbol, Attribute>> symbolStk;
+	stack<semanticTreeNode> semanticTreeStk;
 	stateStk.push(0);
 	int ip = 0;
 	int state;
@@ -1113,11 +1137,16 @@ void process() {
 				}
 				else { // 符号表中存在
 					tempAttribute.Type = mySymbolTable.symStk[t].type;
+					tempAttribute.value = mySymbolTable.symStk[t].value;
+					tempAttribute.numberInTable = t;
+					semanticTreeStk.push(semanticTreeNode(describe, "id"));
 				}
 			}
 			// 如果移入num
 			else if (symIdToStr(tempSymbol.getId()) == "num") {
 				tempAttribute.value = atoi(describe.c_str());
+				tempAttribute.Type = "int";
+				semanticTreeStk.push(semanticTreeNode(describe, "num"));
 			}
 
 			symbolStk.push(make_pair(tempSymbol, tempAttribute));
@@ -1164,54 +1193,94 @@ void process() {
 				type = "";
 			}
 			else if (number == 58) { // Exp -> id
-				int t = mySymbolTable.searchRecord(testStr[ip-1].second);
-				if (t == -1)
-						cout << "变量未定义!!\t\t" << describe << endl;
-				else { // 符号表中存在
+				int t = computeVec[0].second.numberInTable;
+				//	mySymbolTable.searchRecord(testStr[ip-1].second);
+				//if (t == -1)
+				//		cout << "变量未定义!!\t\t" << describe << endl;
+				//else { // 符号表中存在
+					tempAttribute.numberInTable = t;
 					tempAttribute.Type = mySymbolTable.symStk[t].type;
 					tempAttribute.value = mySymbolTable.symStk[t].value;
-				}
+				//}
 			}
 			else if (number == 59) { // Exp -> num
-				cout << "Exp -> num  :" << computeVec[0].second.value << endl;
+				tempAttribute.Type = computeVec[0].second.Type;
 				tempAttribute.value = computeVec[0].second.value;
-			}
-			else if (number == 45) { // 45 Exp -> Exp + Exp
-				// 首先判断类型
-				if (computeVec[0].second.Type != computeVec[2].second.Type) {
-					cout << "类型不匹配！！！\n" << endl;
-				}
-				cout << "Exp -> Exp + Exp  : " << computeVec[2].second.value <<  " + " << computeVec[0].second.value << endl;
-				tempAttribute.value = computeVec[2].second.value + computeVec[0].second.value;
-				tempAttribute.Type = computeVec[2].second.Type;
 			}
 			else if (number == 43) { // 43 Exp -> Exp = Exp
-				tempAttribute.value = computeVec[0].second.value;
-				tempAttribute.Type = computeVec[0].second.Type;
+				// 首先判断类型
+				Attribute temp2 = computeVec[0].second;
+				Attribute temp1 = computeVec[2].second;
+				tempAttribute.Type = "int";
+				if (temp1.Type != temp2.Type) {
+					cout << "类型不匹配！！\n" << endl;
+					tempAttribute.value = 0;
+				}
+				else {
+					cout << "赋值语句：" << temp2.value << endl;
+					mySymbolTable.symStk[temp1.numberInTable].value = temp2.value;
+					tempAttribute.value = 1;
+				}
+			}
+			else if (number == 45) { // 45 Exp -> Exp + Exp
+				Attribute temp2 = computeVec[0].second;
+				Attribute temp1 = computeVec[2].second;
+				tempAttribute.Type = "int";
+				if (temp1.Type != temp2.Type) {
+					cout << "类型不匹配！！\n" << endl;
+				}
+				else {
+					cout << "算术语句：" << temp1.value << " + " << temp2.value << endl;
+					tempAttribute.value = temp1.value + temp2.value;
+					semanticTreeNode& temp1 = semanticTreeStk.top(); semanticTreeStk.pop();
+					semanticTreeNode& temp2 = semanticTreeStk.top(); semanticTreeStk.pop();
+					semanticTreeNode newNode("+", "op");
+					newNode.left = &temp2;
+					newNode.right = &temp1;
+					semanticTreeStk.push(newNode);
+				}
 			}
 			else if (number == 46) { // 46 Exp -> Exp - Exp
-				if (computeVec[0].second.Type != computeVec[2].second.Type) {
-					cout << "类型不匹配！！！\n" << endl;
+				Attribute temp2 = computeVec[0].second;
+				Attribute temp1 = computeVec[2].second;
+				tempAttribute.Type = "int";
+				if (temp1.Type != temp2.Type) {
+					cout << "类型不匹配！！\n" << endl;
 				}
-				cout << "Exp -> Exp - Exp  : " << computeVec[2].second.value << " - " << computeVec[0].second.value << endl;
-				tempAttribute.value = computeVec[2].second.value - computeVec[0].second.value;
-				tempAttribute.Type = computeVec[2].second.Type;
+				else {
+					cout << "算术语句：" << temp1.value << " - " << temp2.value << endl;
+					tempAttribute.value = temp1.value - temp2.value;
+				}
 			}
 			else if (number == 47) { // 47 Exp -> Exp * Exp
-				if (computeVec[0].second.Type != computeVec[2].second.Type) {
-					cout << "类型不匹配！！！\n" << endl;
+				Attribute temp2 = computeVec[0].second;
+				Attribute temp1 = computeVec[2].second;
+				tempAttribute.Type = "int";
+				if (temp1.Type != temp2.Type) {
+					cout << "类型不匹配！！\n" << endl;
 				}
-				cout << "Exp -> Exp * Exp  : " << computeVec[2].second.value << " * " << computeVec[0].second.value << endl;
-				tempAttribute.value = computeVec[2].second.value * computeVec[0].second.value;
-				tempAttribute.Type = computeVec[2].second.Type;
+				else {
+					cout << "算术语句：" << temp1.value << " * " << temp2.value << endl;
+					tempAttribute.value = temp1.value * temp2.value;
+				}
 			}
 			else if (number == 48) { // 48 Exp -> Exp / Exp
-				if (computeVec[0].second.Type != computeVec[2].second.Type) {
-					cout << "类型不匹配！！！\n" << endl;
+				Attribute temp2 = computeVec[0].second;
+				Attribute temp1 = computeVec[2].second;
+				tempAttribute.Type = "int";
+				if (temp1.Type != temp2.Type) {
+					cout << "类型不匹配！！\n" << endl;
 				}
-				cout << "Exp -> Exp / Exp  : " << computeVec[2].second.value << " / " << computeVec[0].second.value << endl;
-				tempAttribute.value = computeVec[2].second.value / computeVec[0].second.value;
-				tempAttribute.Type = computeVec[2].second.Type;
+				else {
+					cout << "算术语句：" << temp1.value << " / " << temp2.value << endl;
+					tempAttribute.value = temp1.value / temp2.value;
+				}
+			}
+			else if (number == 29) { // 29 Stmt -> Exp ;
+				semanticTreeNode& temp = semanticTreeStk.top(); semanticTreeStk.pop();
+				cout << "语法树：：\n\n" << endl;
+				printSemanticTree(temp);
+				cout << "\n\n" << endl;
 			}
 			
 			symbolStk.push(make_pair(production.getLeftSymbol(), tempAttribute));
