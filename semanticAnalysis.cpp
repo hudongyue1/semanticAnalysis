@@ -271,7 +271,7 @@ set<Symbol> allSymbols;
 vector<pair<int, Item>> productions;
 
 // 存储错误信息
-vector<pair<int, Symbol>> errorRecord;
+vector<pair<int, string>> errorRecord;
 
 // 存储测试文件
 vector<pair<Symbol, string>> testStr;
@@ -1073,10 +1073,19 @@ struct semanticTreeNode {
 
 };
 
-void printSemanticTree(semanticTreeNode& node) {
-	cout << node.element << endl;
-	/*if (node.left != nullptr) printSemanticTree(*node.left);
-	if (node.right != nullptr) printSemanticTree(*node.right);*/
+void printSemanticTree(semanticTreeNode* node, int num) {
+	if (node == nullptr) { 
+		cout << endl; 
+		return;
+	}
+	
+	cout << node->element << "\t";
+	printSemanticTree(node->left, num+1);
+
+	int t = num;
+	while (t-- >= 0) cout << "\t";
+	printSemanticTree(node->right, num + 1);
+
 	return;
 }
 
@@ -1086,7 +1095,7 @@ SymbolTable mySymbolTable;
 void process() {
 	stack<int> stateStk;
 	stack<pair<Symbol, Attribute>> symbolStk;
-	stack<semanticTreeNode> semanticTreeStk;
+	stack<semanticTreeNode*> semanticTreeStk;
 	stateStk.push(0);
 	int ip = 0;
 	int state;
@@ -1122,12 +1131,14 @@ void process() {
 			stateStk.push(action[state][tempSymbol].second);
 			Attribute tempAttribute;
 			// 如果移入id,并且符号表中尚不存在
-
 			if (symIdToStr(tempSymbol.getId()) == "id") {
 				int t = mySymbolTable.searchRecord(describe);
 				if (t == -1) {
-					if (type == "") { // 没有specifier，即非声明语句
+					if (type == "" && symIdToStr((testStr[ip-1].first).getId()) != "struct") { // 没有specifier，即非声明语句
 						cout << "变量未定义!!\n\n" << endl;
+						errorRecord.push_back({ columnNum[ip], "变量未定义!" });
+						break;
+						
 					}
 					else { // 从type获取类型，加入符号表
 						cout << "符号表加入" << describe << ",类型为: " << type << "\n\n" << endl;
@@ -1136,17 +1147,22 @@ void process() {
 					}
 				}
 				else { // 符号表中存在
-					tempAttribute.Type = mySymbolTable.symStk[t].type;
-					tempAttribute.value = mySymbolTable.symStk[t].value;
-					tempAttribute.numberInTable = t;
-					semanticTreeStk.push(semanticTreeNode(describe, "id"));
+					if(type == "" && symIdToStr((testStr[ip - 1].first).getId()) != "struct") {
+						tempAttribute.Type = mySymbolTable.symStk[t].type;
+						tempAttribute.value = mySymbolTable.symStk[t].value;
+						tempAttribute.numberInTable = t;
+					}
+					else {
+						cout << "变量重定义!!\n\n" << endl;
+						errorRecord.push_back({ columnNum[ip], "变量重定义!" });
+					}
 				}
 			}
 			// 如果移入num
 			else if (symIdToStr(tempSymbol.getId()) == "num") {
 				tempAttribute.value = atoi(describe.c_str());
 				tempAttribute.Type = "int";
-				semanticTreeStk.push(semanticTreeNode(describe, "num"));
+				
 			}
 
 			symbolStk.push(make_pair(tempSymbol, tempAttribute));
@@ -1188,9 +1204,17 @@ void process() {
 				cout << "specifier, type   =   " << type << endl;
 				tempAttribute.Type = type;
 			} 
-			else if (number == 4 || number == 5 || number == 6) { 
+			else if (number == 4 || number == 5 || number == 6) {
 				cout << "一条完整的声明语句！！！\n"  << endl;
 				type = "";
+			}
+			else if (number == 29) { // 29 Stmt -> Exp ;
+				if (!semanticTreeStk.empty()) {
+					semanticTreeNode* temp = semanticTreeStk.top(); semanticTreeStk.pop();
+					cout << "语法树：：\n\n" << endl;
+					printSemanticTree(temp, 0);
+					cout << "\n\n" << endl;
+				}
 			}
 			else if (number == 58) { // Exp -> id
 				int t = computeVec[0].second.numberInTable;
@@ -1198,14 +1222,16 @@ void process() {
 				//if (t == -1)
 				//		cout << "变量未定义!!\t\t" << describe << endl;
 				//else { // 符号表中存在
-					tempAttribute.numberInTable = t;
-					tempAttribute.Type = mySymbolTable.symStk[t].type;
-					tempAttribute.value = mySymbolTable.symStk[t].value;
+				tempAttribute.numberInTable = t;
+				tempAttribute.Type = mySymbolTable.symStk[t].type;
+				tempAttribute.value = mySymbolTable.symStk[t].value;
+				semanticTreeStk.push(new semanticTreeNode(mySymbolTable.symStk[t].name, "id"));
 				//}
 			}
 			else if (number == 59) { // Exp -> num
 				tempAttribute.Type = computeVec[0].second.Type;
 				tempAttribute.value = computeVec[0].second.value;
+				semanticTreeStk.push(new semanticTreeNode(to_string(computeVec[0].second.value), "num"));
 			}
 			else if (number == 43) { // 43 Exp -> Exp = Exp
 				// 首先判断类型
@@ -1214,6 +1240,7 @@ void process() {
 				tempAttribute.Type = "int";
 				if (temp1.Type != temp2.Type) {
 					cout << "类型不匹配！！\n" << endl;
+					errorRecord.push_back({ columnNum[ip], "类型不匹配！" });
 					tempAttribute.value = 0;
 				}
 				else {
@@ -1221,22 +1248,34 @@ void process() {
 					mySymbolTable.symStk[temp1.numberInTable].value = temp2.value;
 					tempAttribute.value = 1;
 				}
+
+				semanticTreeNode* Node1, *Node2;
+				Node2 = semanticTreeStk.top(); semanticTreeStk.pop();
+				Node1 = semanticTreeStk.top(); semanticTreeStk.pop();
+
+				semanticTreeNode* newNode = new semanticTreeNode("=", "op");
+				newNode->left = Node1;
+				newNode->right = Node2;
+				semanticTreeStk.push(newNode);
 			}
 			else if (number == 45) { // 45 Exp -> Exp + Exp
 				Attribute temp2 = computeVec[0].second;
 				Attribute temp1 = computeVec[2].second;
 				tempAttribute.Type = "int";
-				if (temp1.Type != temp2.Type) {
+				if (temp1.Type != temp2.Type || !(temp1.Type == "int" || temp1.Type == "float")) {
 					cout << "类型不匹配！！\n" << endl;
+					errorRecord.push_back({ columnNum[ip], "类型不匹配！" });
 				}
 				else {
 					cout << "算术语句：" << temp1.value << " + " << temp2.value << endl;
 					tempAttribute.value = temp1.value + temp2.value;
-					semanticTreeNode& temp1 = semanticTreeStk.top(); semanticTreeStk.pop();
-					semanticTreeNode& temp2 = semanticTreeStk.top(); semanticTreeStk.pop();
-					semanticTreeNode newNode("+", "op");
-					newNode.left = &temp2;
-					newNode.right = &temp1;
+					semanticTreeNode* Node1, *Node2;
+					Node2 = semanticTreeStk.top(); semanticTreeStk.pop();
+					Node1 = semanticTreeStk.top(); semanticTreeStk.pop();
+					
+					semanticTreeNode* newNode = new semanticTreeNode("+", "op");
+					newNode->left = Node1;
+					newNode->right = Node2;
 					semanticTreeStk.push(newNode);
 				}
 			}
@@ -1244,43 +1283,75 @@ void process() {
 				Attribute temp2 = computeVec[0].second;
 				Attribute temp1 = computeVec[2].second;
 				tempAttribute.Type = "int";
-				if (temp1.Type != temp2.Type) {
+				if (temp1.Type != temp2.Type || !(temp1.Type == "int" || temp1.Type == "float")) {
 					cout << "类型不匹配！！\n" << endl;
+					errorRecord.push_back({ columnNum[ip], "类型不匹配！" });
 				}
 				else {
 					cout << "算术语句：" << temp1.value << " - " << temp2.value << endl;
 					tempAttribute.value = temp1.value - temp2.value;
+
+					semanticTreeNode* Node1, *Node2;
+					Node2 = semanticTreeStk.top(); semanticTreeStk.pop();
+					Node1 = semanticTreeStk.top(); semanticTreeStk.pop();
+
+					semanticTreeNode* newNode = new semanticTreeNode("-", "op");
+					newNode->left = Node1;
+					newNode->right = Node2;
+					semanticTreeStk.push(newNode);
 				}
 			}
 			else if (number == 47) { // 47 Exp -> Exp * Exp
 				Attribute temp2 = computeVec[0].second;
 				Attribute temp1 = computeVec[2].second;
 				tempAttribute.Type = "int";
-				if (temp1.Type != temp2.Type) {
+				if (temp1.Type != temp2.Type || !(temp1.Type == "int" || temp1.Type == "float")) {
 					cout << "类型不匹配！！\n" << endl;
+					errorRecord.push_back({ columnNum[ip], "类型不匹配！" });
 				}
 				else {
 					cout << "算术语句：" << temp1.value << " * " << temp2.value << endl;
 					tempAttribute.value = temp1.value * temp2.value;
+
+					semanticTreeNode* Node1, *Node2;
+					Node2 = semanticTreeStk.top(); semanticTreeStk.pop();
+					Node1 = semanticTreeStk.top(); semanticTreeStk.pop();
+
+					semanticTreeNode* newNode = new semanticTreeNode("*", "op");
+					newNode->left = Node1;
+					newNode->right = Node2;
+					semanticTreeStk.push(newNode);
 				}
 			}
 			else if (number == 48) { // 48 Exp -> Exp / Exp
 				Attribute temp2 = computeVec[0].second;
 				Attribute temp1 = computeVec[2].second;
 				tempAttribute.Type = "int";
-				if (temp1.Type != temp2.Type) {
+				if (temp1.Type != temp2.Type || !(temp1.Type == "int" || temp1.Type == "float")) {
 					cout << "类型不匹配！！\n" << endl;
+					errorRecord.push_back({ columnNum[ip], "类型不匹配！" });
 				}
 				else {
 					cout << "算术语句：" << temp1.value << " / " << temp2.value << endl;
 					tempAttribute.value = temp1.value / temp2.value;
+
+					semanticTreeNode* Node1, *Node2;
+					Node2 = semanticTreeStk.top(); semanticTreeStk.pop();
+					Node1 = semanticTreeStk.top(); semanticTreeStk.pop();
+
+					semanticTreeNode* newNode = new semanticTreeNode("/", "op");
+					newNode->left = Node1;
+					newNode->right = Node2;
+					semanticTreeStk.push(newNode);
 				}
 			}
-			else if (number == 29) { // 29 Stmt -> Exp ;
-				semanticTreeNode& temp = semanticTreeStk.top(); semanticTreeStk.pop();
-				cout << "语法树：：\n\n" << endl;
-				printSemanticTree(temp);
-				cout << "\n\n" << endl;
+			else if (number == 51) { // 51 Exp -> ( Exp )
+				tempAttribute.numberInTable = computeVec[1].second.numberInTable;
+				tempAttribute.Type = computeVec[1].second.Type;
+				tempAttribute.value = computeVec[1].second.value;
+			}
+			else if (number == 21 || number == 22) {// 21 FunDec -> id ( VarList )  22 FunDec->id()			
+				type = "";
 			}
 			
 			symbolStk.push(make_pair(production.getLeftSymbol(), tempAttribute));
@@ -1307,7 +1378,22 @@ void process() {
 			else {
 				cout << "Error!\n" << endl;
 				cout << tempSymbol << endl;
-				errorRecord.push_back({ columnNum[ip], tempSymbol });
+
+				pair<Symbol, Attribute> temp1, temp2;
+				temp2 = symbolStk.top(); symbolStk.pop();
+				temp1 = symbolStk.top(); symbolStk.pop();
+
+				if((symIdToStr(testStr[ip].first.getId()) == "id" || symIdToStr(testStr[ip].first.getId()) == "num") &&
+				 symIdToStr(testStr[ip-1].first.getId()) == "id" || symIdToStr(testStr[ip-1].first.getId()) == "num"))
+					errorRecord.push_back({ columnNum[ip], "丢失运算符!" });
+				else if (symIdToStr(testStr[ip].first.getId()) == ")" && (symIdToStr(testStr[ip - 1].first.getId()) == "+" ||
+					symIdToStr(testStr[ip - 1].first.getId()) == "-" || symIdToStr(testStr[ip - 1].first.getId()) == "*" ||
+					symIdToStr(testStr[ip - 1].first.getId()) == "/"))
+					errorRecord.push_back({ columnNum[ip], "丢失操作数!" });
+				else errorRecord.push_back({ columnNum[ip], "语义分析错误!" });
+
+				symbolStk.push(temp1);
+				symbolStk.push(temp2);
 				// 首先退出当前状态栈顶元素
 				cout << "退出状态栈：" << stateStk.top() << endl;
 				stateStk.pop();
@@ -1347,7 +1433,7 @@ void process() {
 void printError() {
 	cout << "错误统计：" << endl;
 	cout << "错误总数：" << errorRecord.size() << endl;
-	cout << "错误行号\t" << "错误符号\t" << endl;
+	cout << "错误行号\t" << "错误类型\t" << endl;
 	for (int i = 0; i < errorRecord.size(); ++i)
 		cout << errorRecord[i].first << "\t" << errorRecord[i].second << endl;
 }
